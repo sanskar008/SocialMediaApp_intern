@@ -1,5 +1,4 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:socialmedia/bottom_nav_bar/activity/acitivity_screen.dart';
 import 'package:socialmedia/users/show_post_content.dart';
@@ -11,6 +10,7 @@ class Message {
   final DateTime timestamp;
   final SharedPost? sharedPost;
   final StoryReply? entity;
+  List<Reaction>? reactions;
 
   Message({
     required this.id,
@@ -19,28 +19,35 @@ class Message {
     required this.timestamp,
     this.sharedPost,
     this.entity,
+    this.reactions,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
     SharedPost? sharedPost;
     StoryReply? storyReply;
     String content = json['content'] ?? '';
+    List<Reaction>? reactions;
 
-    // Try to decode content as JSON (if it's a valid JSON string)
-    try {
-      final decodedContent = jsonDecode(content);
-      if (decodedContent is Map<String, dynamic>) {
-        // If it has "_id" and "data" keys, treat it as a SharedPost
-        if (decodedContent.containsKey('_id') &&
-            decodedContent.containsKey('data')) {
-          sharedPost = SharedPost.fromJson(decodedContent);
-        }
-      }
-    } catch (e) {
-      // If parsing fails, it means content is a normal text message
+    // reactions block
+    if (json['reactions'] != null && json['reactions'] is List) {
+      reactions = (json['reactions'] as List)
+          .map((r) => Reaction.fromJson(r as Map<String, dynamic>))
+          .toList();
     }
 
-    // Try to decode entity as JSON (if applicable)
+    // Parse content for shared post
+    try {
+      final decodedContent = jsonDecode(content);
+      if (decodedContent is Map<String, dynamic> &&
+          decodedContent.containsKey('_id') &&
+          decodedContent.containsKey('data')) {
+        sharedPost = SharedPost.fromJson(decodedContent);
+      }
+    } catch (e) {
+      // Content is normal text if parsing fails
+    }
+
+    // Parse entity for story reply
     try {
       final entityDecoded = jsonDecode(json['entity'] ?? '{}');
       if (entityDecoded is Map<String, dynamic> &&
@@ -50,11 +57,10 @@ class Message {
       }
     } catch (e) {}
 
-    // Handle timestamp conversion: if it's an int, convert it from Unix time.
+    // Parse timestamp
     DateTime parsedTimestamp;
     if (json['timestamp'] != null) {
       if (json['timestamp'] is int) {
-        // Assuming timestamp is in seconds
         parsedTimestamp =
             DateTime.fromMillisecondsSinceEpoch(json['timestamp'] * 1000);
       } else if (json['timestamp'] is String) {
@@ -73,6 +79,21 @@ class Message {
       timestamp: parsedTimestamp,
       sharedPost: sharedPost,
       entity: storyReply,
+      reactions: reactions,
+    );
+  }
+}
+
+class Reaction {
+  final String emoji;
+  final String userId;
+
+  Reaction({required this.emoji, required this.userId});
+
+  factory Reaction.fromJson(Map<String, dynamic> json) {
+    return Reaction(
+      emoji: json['reaction'] ?? '',
+      userId: json['userId'] ?? '',
     );
   }
 }
@@ -94,11 +115,11 @@ class SharedPost {
 
   factory SharedPost.fromJson(Map<String, dynamic> json) {
     return SharedPost(
-      id: json['_id'],
-      author: json['author'],
-      data: PostData.fromJson(json['data']),
-      feedId: json['feedId'],
-      name: json['name'],
+      id: json['_id'] ?? '',
+      author: json['author'] ?? '',
+      data: PostData.fromJson(json['data'] ?? {}),
+      feedId: json['feedId'] ?? '',
+      name: json['name'] ?? '',
     );
   }
 }
@@ -114,7 +135,7 @@ class PostData {
 
   factory PostData.fromJson(Map<String, dynamic> json) {
     return PostData(
-      content: json['content'],
+      content: json['content'] ?? '',
       media: (json['media'] as List?)
           ?.map((e) => Media.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -133,16 +154,15 @@ class Media {
 
   factory Media.fromJson(Map<String, dynamic> json) {
     return Media(
-      url: json['url'],
-      type: json['type'],
+      url: json['url'] ?? '',
+      type: json['type'] ?? '',
     );
   }
 }
 
 class StoryReply {
   final String content;
-
-  final String? storyUrl; // Extracted from the inner entity
+  final String? storyUrl;
   final bool isBot;
 
   StoryReply({
@@ -152,14 +172,12 @@ class StoryReply {
   });
 
   factory StoryReply.fromJson(Map<String, dynamic> json) {
-    // Check if the entity is nested within another 'entity' key
     final entityDetails = json['entity'] is Map ? json['entity'] : json;
 
     return StoryReply(
-      content: json["content"],
-      storyUrl:
-          entityDetails['url'], // Extract URL from nested or top-level entity
-      isBot: json["isBot"] ?? false,
+      content: json['content'] ?? '',
+      storyUrl: entityDetails['url'],
+      isBot: json['isBot'] ?? false,
     );
   }
 }
@@ -169,6 +187,7 @@ class MessageBubble extends StatelessWidget {
   final bool isSender;
   final Map<String, Participant> participantsMap;
   final String currentUserId;
+  final VoidCallback? onLongPress;
 
   const MessageBubble({
     super.key,
@@ -176,11 +195,11 @@ class MessageBubble extends StatelessWidget {
     required this.isSender,
     required this.participantsMap,
     required this.currentUserId,
+    this.onLongPress,
   });
 
   String _getSenderName() {
-    if (isSender) return ''; // Don't show name for your own messages
-
+    if (isSender) return '';
     final participant = participantsMap[message.senderId];
     return participant?.name ?? 'Unknown User';
   }
@@ -204,48 +223,56 @@ class MessageBubble extends StatelessWidget {
               ),
             ),
           ),
-        Align(
-          alignment: isSender ? Alignment.centerRight : Alignment.centerLeft,
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-            decoration: BoxDecoration(
-              color: isSender ? const Color(0xFF7400A5) : Colors.grey[800],
-              borderRadius: BorderRadius.circular(20),
+        GestureDetector(
+          onLongPress: onLongPress,
+          child: Align(
+            alignment: isSender ? Alignment.centerRight : Alignment.centerLeft,
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+              decoration: BoxDecoration(
+                color: isSender ? const Color(0xFF7400A5) : Colors.grey[800],
+                borderRadius: BorderRadius.circular(20),
+              ),
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.75,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (message.entity != null) _buildStoryReply(context),
+                  if (message.sharedPost != null)
+                    _buildSharedPost(context)
+                  else
+                    Text(
+                      message.content,
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  if (message.reactions != null &&
+                      message.reactions!.isNotEmpty)
+                    Wrap(
+                      spacing: 4,
+                      children: message.reactions!.map((reaction) {
+                        return Text(
+                          reaction.emoji,
+                          style: const TextStyle(fontSize: 12),
+                        );
+                      }).toList(),
+                    ),
+                ],
+              ),
             ),
-            constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.75,
-            ),
-            child: message.entity != null
-                ? Column(
-                    children: [
-                      if (message.entity != null) _buildstoryreply(context),
-                      Text(
-                        message.content,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 16),
-                      ),
-                    ],
-                  )
-                : message.sharedPost != null
-                    ? _buildSharedPost(context)
-                    : Text(
-                        message.content,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 16),
-                      ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildstoryreply(BuildContext context) {
+  Widget _buildStoryReply(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Post header
         const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -254,7 +281,6 @@ class MessageBubble extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        // Post media
         if (message.entity!.storyUrl != null)
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
@@ -263,6 +289,7 @@ class MessageBubble extends StatelessWidget {
               fit: BoxFit.cover,
               width: double.infinity,
               height: 150,
+              errorBuilder: (context, error, stackTrace) => const SizedBox(),
             ),
           ),
       ],
@@ -273,16 +300,17 @@ class MessageBubble extends StatelessWidget {
     return InkWell(
       onTap: () {
         Navigator.push(
-            context,
-            MaterialPageRoute(
-                builder: (context) =>
-                    PostDetailsScreen(feedId: message.sharedPost!.feedId)));
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                PostDetailsScreen(feedId: message.sharedPost!.feedId),
+          ),
+        );
       },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Post header
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -305,8 +333,6 @@ class MessageBubble extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-
-          // Post media (looping over the media list)
           if (message.sharedPost!.data.media != null &&
               message.sharedPost!.data.media!.isNotEmpty)
             Column(
@@ -320,13 +346,13 @@ class MessageBubble extends StatelessWidget {
                       fit: BoxFit.cover,
                       width: double.infinity,
                       height: 150,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const SizedBox(),
                     ),
                   ),
                 );
               }).toList(),
             ),
-
-          // Post content
           if (message.sharedPost!.data.content.isNotEmpty)
             Padding(
               padding: EdgeInsets.only(

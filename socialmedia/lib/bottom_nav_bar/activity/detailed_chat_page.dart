@@ -19,6 +19,7 @@ import 'package:socialmedia/services/agora_video_Call.dart';
 import 'package:socialmedia/services/chat_socket_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:socialmedia/services/message.dart';
+import 'package:socialmedia/services/reaction_picker.dart'; // Add this import
 import 'package:socialmedia/utils/colors.dart';
 import 'package:socialmedia/utils/constants.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -26,7 +27,7 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 class DChatScreen extends StatefulWidget {
   final ChatRoom chatRoom;
 
-  DChatScreen({required this.chatRoom});
+  const DChatScreen({required this.chatRoom, super.key});
 
   @override
   _DChatScreenState createState() => _DChatScreenState();
@@ -50,21 +51,13 @@ class _DChatScreenState extends State<DChatScreen> {
   @override
   void initState() {
     super.initState();
-
-    // Initialize userProvider first
     userProvider = Provider.of<UserProviderall>(context, listen: false);
-
-    // Initialize these before any other operations
     _initializeBasicData();
-    //_initializeChat();
   }
 
   Future<void> _initializeBasicData() async {
     try {
-      // Load user data first
       await userProvider.loadUserData();
-
-      // Get user ID from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       userid = prefs.getString('user_id');
 
@@ -73,18 +66,13 @@ class _DChatScreenState extends State<DChatScreen> {
         return;
       }
 
-      // Initialize socket connection
       await _ensureSocketConnection();
-
-      // Initialize chat after socket connection
       await _initializeChat();
 
-      // Initialize participants map only after we have userid
       if (mounted) {
         initParticipantsMap(widget.chatRoom.participants);
       }
 
-      // Initialize paging controller
       _pagingController.addPageRequestListener((pageKey) {
         _fetchPage(pageKey);
       });
@@ -95,11 +83,9 @@ class _DChatScreenState extends State<DChatScreen> {
         });
       }
 
-      // Fetch first page
       await _fetchPage(1);
     } catch (e) {
       print('Initialization error: $e');
-      // Handle error appropriately
     }
   }
 
@@ -132,44 +118,68 @@ class _DChatScreenState extends State<DChatScreen> {
       await _socketService.connect();
       print('✅ Socket connected: ${_socketService.isConnected}');
 
-      // Remove any existing receiveMessage listener to avoid duplicates
-      // _socketService.socket.off('receiveMessage');
-
-      // Set up the receiveMessage listener with enhanced debugging
-      _socketService.socket.on('receiveMessage', (data) {
+      _socketService.onMessageReceived = (data) {
         print('✅✅✅ Received message via socket: $data');
         try {
           Map<String, dynamic> messageMap;
           if (data is String) {
             messageMap = jsonDecode(data) as Map<String, dynamic>;
-          } else if (data is Map) {
-            messageMap = Map<String, dynamic>.from(data);
           } else {
-            throw Exception('Unexpected data type: ${data.runtimeType}');
+            messageMap = Map<String, dynamic>.from(data);
           }
 
           print('Parsed message keys: ${messageMap.keys.toList()}');
           final newMessage = Message.fromJson(messageMap);
-          final userProvider =
-              Provider.of<UserProviderall>(context, listen: false);
-          final currentUserId = userProvider.userId;
-          // Only insert into the UI if the message is not from the current user.
-          if (newMessage.senderId != currentUserId) {
+          if (newMessage.senderId != userid) {
             if (_pagingController.itemList == null) {
               _pagingController.itemList = [];
             }
             _pagingController.itemList!.insert(0, newMessage);
             _pagingController.notifyListeners();
             print('✅ New message added to list: $newMessage');
-          } else {
-            print('Message not added since it is from the current user.');
           }
         } catch (e) {
           print('🚨 Error processing socket message: $e');
         }
-      });
+      };
 
-      // Debug log to confirm room joining
+      // Add reaction listeners
+      _socketService.onMessageReaction = (data) {
+        print('✅ Received reaction: $data');
+        setState(() {
+          final messageId = data['messageId'];
+          final reaction = data['reaction'];
+          final userId = data['userId'];
+
+          final messages = _pagingController.itemList ?? [];
+          final messageIndex = messages.indexWhere((m) => m.id == messageId);
+          if (messageIndex != -1) {
+            final message = messages[messageIndex];
+            message.reactions ??= [];
+            message.reactions!.add(Reaction(emoji: reaction, userId: userId));
+            _pagingController.notifyListeners();
+          }
+        });
+      };
+
+      _socketService.onReactionRemoved = (data) {
+        print('✅ Reaction removed: $data');
+        setState(() {
+          final messageId = data['messageId'];
+          final userId = data['userId'];
+
+          final messages = _pagingController.itemList ?? [];
+          final messageIndex = messages.indexWhere((m) => m.id == messageId);
+          if (messageIndex != -1) {
+            final message = messages[messageIndex];
+            if (message.reactions != null) {
+              message.reactions!.removeWhere((r) => r.userId == userId);
+              _pagingController.notifyListeners();
+            }
+          }
+        });
+      };
+
       print('✅ Joining room: ${widget.chatRoom.chatRoomId}');
       _socketService.joinRoom(widget.chatRoom.chatRoomId);
     } catch (e, stackTrace) {
@@ -179,7 +189,6 @@ class _DChatScreenState extends State<DChatScreen> {
   }
 
   Future<List<String>> fetchRandomText() async {
-    //print(widget.chatRoom.participants.first.)
     final userProvider = Provider.of<UserProviderall>(context, listen: false);
     String url =
         '${BASE_URL}api/getRandomText?other=${widget.chatRoom.participants.first.userId}';
@@ -195,16 +204,12 @@ class _DChatScreenState extends State<DChatScreen> {
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       final String topicText = data['topic'] ?? '';
-
-      // Splitting the text into individual messages
       List<String> messages = topicText.split('\n').map((msg) {
-        // Remove leading numbers (e.g., "1. ") and quotation marks
         return msg
             .replaceAll(RegExp(r'^\d+\.\s*'), '')
             .replaceAll('"', '')
             .trim();
       }).toList();
-
       return messages;
     } else {
       throw Exception('Failed to fetch data');
@@ -217,9 +222,7 @@ class _DChatScreenState extends State<DChatScreen> {
       final userId = prefs.getString('user_id');
       final token = prefs.getString('user_token');
 
-      if (userId == null || token == null) {
-        return;
-      }
+      if (userId == null || token == null) return;
 
       final response = await http.post(
         Uri.parse('${BASE_URL}api/messages/interact'),
@@ -243,13 +246,12 @@ class _DChatScreenState extends State<DChatScreen> {
 
   Future<void> initSocket() async {
     final prefs = await SharedPreferences.getInstance();
-    String? userId =
-        prefs.getString('user_id'); // Fetch user ID from SharedPreferences
+    String? userId = prefs.getString('user_id');
     print('yelelelelelelellee $userId');
 
     if (userId == null) {
       debugPrint("User ID not found in SharedPreferences");
-      return; // Exit if userId is null
+      return;
     }
 
     _socket = IO.io(BASE_URL, <String, dynamic>{
@@ -260,7 +262,6 @@ class _DChatScreenState extends State<DChatScreen> {
     _socket.connect();
     print('hogyaaaa');
     _socket.emit('openCall', userId);
-
     _socket.onConnect((_) {
       debugPrint("Connected to socket server");
     });
@@ -274,15 +275,12 @@ class _DChatScreenState extends State<DChatScreen> {
   }
 
   Future<void> _fetchPage(int pageKey) async {
-    print('aaliaaaaa');
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('user_id');
       final token = prefs.getString('user_token');
 
-      if (userId == null || token == null) {
-        return;
-      }
+      if (userId == null || token == null) return;
 
       final response = await http.post(
         Uri.parse('${BASE_URL}api/get-all-messages'),
@@ -299,24 +297,18 @@ class _DChatScreenState extends State<DChatScreen> {
       );
 
       if (response.statusCode == 200) {
-        print('yelelelelele $isnewconversation');
-
         final data = json.decode(response.body);
         final List<Message> fetchedMessages = (data['messages'] as List)
             .map((msg) => Message.fromJson(msg))
             .toList();
-        if (fetchedMessages.length > 0) {
+        if (fetchedMessages.isNotEmpty) {
           isnewconversation = false;
           isNewConversation = false;
-          print('lelelelel');
-          print(data['messages'][0]['_id']);
           markMessageAsSeen(data['messages'][0]['_id']);
         }
         setState(() {
           isnewconversation;
         });
-        print('yelele dobara$isnewconversation');
-        print('yelelelele ${fetchedMessages.length}');
         if (pageKey == 1) {
           setState(() {
             _isMessagesLoaded = true;
@@ -342,27 +334,20 @@ class _DChatScreenState extends State<DChatScreen> {
     if (message.isEmpty || userid == null) return;
 
     try {
-      // Create a temporary message object
       final newMessage = Message(
-        id: DateTime.now().toString(), // Temporary ID
+        id: DateTime.now().toString(),
         content: message,
         senderId: userid!,
         timestamp: DateTime.now(),
-        // Add other required fields with default values
       );
 
-      // Add message to the list immediately
-      setState(() {
-        if (_pagingController.itemList == null) {
-          _pagingController.itemList = [];
-        }
-        _pagingController.itemList!.insert(0, newMessage);
-      });
+      if (_pagingController.itemList == null) {
+        _pagingController.itemList = [];
+      }
+      _pagingController.itemList!.insert(0, newMessage);
+      _pagingController.notifyListeners();
 
-      // Clear the input field
       _controller.clear();
-
-      // Send the message through socket
       _socketService.sendMessage(
         userid!,
         widget.chatRoom.chatRoomId,
@@ -377,38 +362,57 @@ class _DChatScreenState extends State<DChatScreen> {
       });
     } catch (e) {
       print('Error sending message: $e');
-      // Optionally remove the message if sending failed
       if (_pagingController.itemList != null) {
-        setState(() {
-          _pagingController.itemList!.removeAt(0);
-        });
+        _pagingController.itemList!.removeAt(0);
+        _pagingController.notifyListeners();
       }
     }
+  }
+
+  void _showReactionPicker(String messageId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.transparent,
+        contentPadding: EdgeInsets.zero,
+        content: ReactionPicker(
+          onReactionSelected: (emoji) {
+            _socketService.addReaction(
+              messageId,
+              widget.chatRoom.chatRoomId,
+              emoji,
+            );
+          },
+        ),
+      ),
+    );
   }
 
   Future<void> _joinCall(String callId, String type, bool fromgroup) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('callToken');
     final channelName = prefs.getString('channelName');
-    bool isvideo = type == 'video' ? true : false;
+    bool isvideo = type == 'video';
 
-    if (token == null || channelName == null) return;
+    if (token == null || channelName == null || userid == null) return;
 
     _socketService.joinCall(callId, userid!);
 
     if (fromgroup) {
       Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-              builder: (context) => VideoCallScreen(
-                    roomId: widget.chatRoom.chatRoomId,
-                    participantsMap: participantsMap,
-                    currentUserId: userid!,
-                    isVideoCall: isvideo,
-                    token: token,
-                    channel: channelName,
-                    callID: callId,
-                  )));
+        context,
+        MaterialPageRoute(
+          builder: (context) => VideoCallScreen(
+            roomId: widget.chatRoom.chatRoomId,
+            participantsMap: participantsMap,
+            currentUserId: userid!,
+            isVideoCall: isvideo,
+            token: token,
+            channel: channelName,
+            callID: callId,
+          ),
+        ),
+      );
       return;
     }
 
@@ -420,9 +424,8 @@ class _DChatScreenState extends State<DChatScreen> {
             channel: channelName,
             token: token,
             callID: callId,
-            profile: widget.chatRoom.participants.first.profilePic == null
-                ? 'assets/avatar/3.png'
-                : widget.chatRoom.participants.first.profilePic!,
+            profile: widget.chatRoom.participants.first.profilePic ??
+                'assets/avatar/3.png',
             name: widget.chatRoom.participants.first.name!,
           ),
         ),
@@ -432,14 +435,14 @@ class _DChatScreenState extends State<DChatScreen> {
         context,
         MaterialPageRoute(
           builder: (context) => AgoraVidCall(
-              channel: channelName,
-              token: token,
-              callerName: 'video call',
-              call_id: callId,
-              profile: widget.chatRoom.participants.first.profilePic == null
-                  ? 'assets/avatar/3.png'
-                  : widget.chatRoom.participants.first.profilePic!,
-              name: widget.chatRoom.participants.first.name!),
+            channel: channelName,
+            token: token,
+            callerName: 'video call',
+            call_id: callId,
+            profile: widget.chatRoom.participants.first.profilePic ??
+                'assets/avatar/3.png',
+            name: widget.chatRoom.participants.first.name!,
+          ),
         ),
       );
     }
@@ -471,29 +474,9 @@ class _DChatScreenState extends State<DChatScreen> {
       await prefs.setString('callToken', data['token']);
       print('Call started: ${data['message']}');
 
-      _socketService.initiateCall(data['call']['_id'], userId, [toUserId], type);
+      _socketService.initiateCall(
+          data['call']['_id'], userId, [toUserId], type);
       _joinCall(data['call']['_id'], type, fromgrp);
-
-      // if (type == 'audio') {
-      //   Navigator.pushReplacement(
-      //       context,
-      //       MaterialPageRoute(
-      //           builder: (context) => AgoraCallService(
-      //                 channel: data['call']['channelName'],
-      //                 token: data['token'],
-      //                 callID: data['call']['_id'],
-      //               )));
-      // } else {
-      //   Navigator.pushReplacement(
-      //       context,
-      //       MaterialPageRoute(
-      //           builder: (context) => AgoraVidCall(
-      //                 channel: data['call']['channelName'],
-      //                 token: data['token'],
-      //                 callerName: 'video call',
-      //                 call_id: data['call']['_id'],
-      //               )));
-      // }
     } else {
       print('Failed to start call');
     }
@@ -510,10 +493,7 @@ class _DChatScreenState extends State<DChatScreen> {
           participantsMap: participantsMap,
           onInvite: (userId) async {
             await startCall(widget.chatRoom.chatRoomId, type, true);
-            // Handle invite logic here
-
             print('Inviting user: $userId');
-            // You might want to add API call to invite user
           },
         ),
       ),
@@ -522,7 +502,7 @@ class _DChatScreenState extends State<DChatScreen> {
 
   void _copyAndPasteText(String text) {
     Clipboard.setData(ClipboardData(text: text));
-    _controller.text = text; // Automatically set text in the input field
+    _controller.text = text;
   }
 
   String truncateName(String name, {int maxLength = 10}) {
@@ -534,7 +514,7 @@ class _DChatScreenState extends State<DChatScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_isMessagesLoaded || userid == null) {
-      return CompleteChatShimmer();
+      return const CompleteChatShimmer();
     }
 
     return SafeArea(
@@ -552,47 +532,44 @@ class _DChatScreenState extends State<DChatScreen> {
               onTap: () {
                 if (widget.chatRoom.roomType == 'group') {
                   Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (context) => Particiapntgrp(
-                              chatRoomId: widget.chatRoom.chatRoomId)));
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => Particiapntgrp(
+                        chatRoomId: widget.chatRoom.chatRoomId,
+                      ),
+                    ),
+                  );
                 }
               },
               child: Row(
                 children: [
                   IconButton(
-                      onPressed: () {
-                        Navigator.pushReplacement(context, MaterialPageRoute(
-                            builder: (context) => BottomNavBarScreen()));
-                      },
-                      icon: Icon(Icons.arrow_back_ios)),
+                    onPressed: () {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => BottomNavBarScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.arrow_back_ios),
+                  ),
                   InkWell(
                     onTap: () {
                       print(widget.chatRoom.participants.first.name);
                     },
-                    child: GestureDetector(
-                      onTap: () {
-                        if (widget.chatRoom.roomType == 'group') {
-                          Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (context) => Particiapntgrp(
-                                      chatRoomId: widget.chatRoom.chatRoomId)));
-                        }
-                      },
-                      child: CircleAvatar(
-                        backgroundImage: widget.chatRoom.roomType == 'dm'
-                            ? widget.chatRoom.participants.first.profilePic ==
-                                    null
-                                ? const AssetImage('assets/avatar/3.png')
-                                    as ImageProvider
-                                : NetworkImage(widget
-                                    .chatRoom.participants.first.profilePic!)
-                            : widget.chatRoom.groupProfile == null
-                                ? const AssetImage('assets/avatar/3.png')
-                                    as ImageProvider
-                                : NetworkImage(widget.chatRoom.groupProfile!),
-                      ),
+                    child: CircleAvatar(
+                      backgroundImage: widget.chatRoom.roomType == 'dm'
+                          ? widget.chatRoom.participants.first.profilePic ==
+                                  null
+                              ? const AssetImage('assets/avatar/3.png')
+                                  as ImageProvider
+                              : NetworkImage(widget
+                                  .chatRoom.participants.first.profilePic!)
+                          : widget.chatRoom.groupProfile == null
+                              ? const AssetImage('assets/avatar/3.png')
+                                  as ImageProvider
+                              : NetworkImage(widget.chatRoom.groupProfile!),
                     ),
                   ),
                   SizedBox(width: 6.w),
@@ -607,13 +584,15 @@ class _DChatScreenState extends State<DChatScreen> {
                       children: [
                         Text(
                           truncateName(widget.chatRoom.groupName!),
-                          style: TextStyle(fontSize: 28.sp, color: Colors.white),
+                          style:
+                              TextStyle(fontSize: 28.sp, color: Colors.white),
                         ),
                         Text(
                           'Group',
                           style: TextStyle(
-                              fontSize: 12.sp,
-                              color: const Color.fromARGB(255, 185, 184, 184)),
+                            fontSize: 12.sp,
+                            color: const Color.fromARGB(255, 185, 184, 184),
+                          ),
                         ),
                       ],
                     ),
@@ -628,27 +607,25 @@ class _DChatScreenState extends State<DChatScreen> {
           ),
           actions: [
             IconButton(
-                onPressed: () {
-                  widget.chatRoom.roomType == 'group'
-                      ? showAddFriendsSheet(context, participantsMap, 'audio')
-                      : startCall(widget.chatRoom.participants.first.userId,
-                          "audio", false);
-                },
-                icon: Icon(Icons.call, color: Color(0xFF7400A5))),
-            SizedBox(
-              width: 8.w,
+              onPressed: () {
+                widget.chatRoom.roomType == 'group'
+                    ? showAddFriendsSheet(context, participantsMap, 'audio')
+                    : startCall(widget.chatRoom.participants.first.userId,
+                        "audio", false);
+              },
+              icon: const Icon(Icons.call, color: Color(0xFF7400A5)),
             ),
+            SizedBox(width: 8.w),
             IconButton(
-                onPressed: () {
-                  widget.chatRoom.roomType == 'group'
-                      ? showAddFriendsSheet(context, participantsMap, 'video')
-                      : startCall(widget.chatRoom.participants.first.userId,
-                          "video", false);
-                },
-                icon: Icon(Icons.video_call, color: Color(0xFF7400A5))),
-            SizedBox(
-              width: 8.w,
-            )
+              onPressed: () {
+                widget.chatRoom.roomType == 'group'
+                    ? showAddFriendsSheet(context, participantsMap, 'video')
+                    : startCall(widget.chatRoom.participants.first.userId,
+                        "video", false);
+              },
+              icon: const Icon(Icons.video_call, color: Color(0xFF7400A5)),
+            ),
+            SizedBox(width: 8.w),
           ],
         ),
         body: SafeArea(
@@ -659,50 +636,25 @@ class _DChatScreenState extends State<DChatScreen> {
                   pagingController: _pagingController,
                   reverse: true,
                   builderDelegate: PagedChildBuilderDelegate<Message>(
-                      itemBuilder: (context, message, index) {
-                    final isSender = message.senderId == userid;
-                    return InkWell(
-                      onTap: () {
-                        print(
-                            'Participants: ${widget.chatRoom.participants.map((p) => p.name).toList()}');
-                      },
-                      child: MessageBubble(
+                    itemBuilder: (context, message, index) {
+                      final isSender = message.senderId == userid;
+                      return MessageBubble(
                         message: message,
                         isSender: isSender,
                         participantsMap: participantsMap,
                         currentUserId: userid!,
-                      ),
-                    );
-      
-                    // Align(
-                    //   alignment:
-                    //       isSender ? Alignment.centerRight : Alignment.centerLeft,
-                    //   child: Container(
-                    //     margin: EdgeInsets.symmetric(vertical: 4, horizontal: 10),
-                    //     padding:
-                    //         EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-                    //     decoration: BoxDecoration(
-                    //       color: isSender
-                    //           ? Colors.purple.shade200
-                    //           : Colors.grey[800],
-                    //       borderRadius: BorderRadius.circular(20),
-                    //     ),
-                    //     child: Text(
-                    //       message.content,
-                    //       style: TextStyle(color: Colors.white, fontSize: 16),
-                    //     ),
-                    //   ),
-                    // );
-                  }, noItemsFoundIndicatorBuilder: (context) {
-                    return Center(
-                      child: Text(
-                        'No Messages Yet. Start The Conversation',
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
+                        onLongPress: () => _showReactionPicker(message.id),
+                      );
+                    },
+                    noItemsFoundIndicatorBuilder: (context) {
+                      return Center(
+                        child: Text(
+                          'No Messages Yet. Start The Conversation',
+                          style: GoogleFonts.poppins(fontSize: 14),
                         ),
-                      ),
-                    );
-                  }),
+                      );
+                    },
+                  ),
                 ),
               ),
               Padding(
@@ -710,135 +662,124 @@ class _DChatScreenState extends State<DChatScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    isNewConversation
-                        ? FutureBuilder<List<String>>(
-                            future:
-                                _randomTextFuture, // your cached future from initState
-                            builder: (context, snapshot) {
-                              // If it's not a new conversation, don't show anything.
-                              if (!isNewConversation)
-                                return const SizedBox.shrink();
-      
-                              if (snapshot.connectionState ==
-                                  ConnectionState.waiting) {
-                                // Shimmer effect with the same height as the suggestion list.
-                                return SizedBox(
-                                  height: 80,
-                                  child: Shimmer.fromColors(
-                                    baseColor: Colors.purple[300]!,
-                                    highlightColor: Colors.purple[100]!,
+                    if (isNewConversation)
+                      FutureBuilder<List<String>>(
+                        future: _randomTextFuture,
+                        builder: (context, snapshot) {
+                          if (!isNewConversation)
+                            return const SizedBox.shrink();
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return SizedBox(
+                              height: 80,
+                              child: Shimmer.fromColors(
+                                baseColor: Colors.purple[300]!,
+                                highlightColor: Colors.purple[100]!,
+                                child: ListView.builder(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: 3,
+                                  itemBuilder: (context, index) {
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8.0),
+                                      child: Container(
+                                        width: 250,
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            );
+                          } else if (snapshot.hasError) {
+                            return SizedBox(
+                              height: 80,
+                              child: Center(
+                                  child: Text('Error: ${snapshot.error}')),
+                            );
+                          } else {
+                            final List<String> suggestions =
+                                snapshot.data ?? [];
+                            if (suggestions.isEmpty)
+                              return const SizedBox.shrink();
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10.0, vertical: 4.0),
+                                    child: Text(
+                                      'BondChat Suggestions',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: Theme.of(context).brightness ==
+                                                Brightness.dark
+                                            ? AppColors.darkText
+                                            : AppColors.lightText,
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    height: 90,
                                     child: ListView.builder(
                                       scrollDirection: Axis.horizontal,
-                                      itemCount: 3, // Show 3 placeholder items
+                                      itemCount: suggestions.length,
                                       itemBuilder: (context, index) {
                                         return Padding(
                                           padding: const EdgeInsets.symmetric(
                                               horizontal: 8.0),
-                                          child: Container(
-                                            width: 250,
-                                            padding: const EdgeInsets.all(12),
-                                            decoration: BoxDecoration(
-                                              color: Colors
-                                                  .white, // base color for shimmer child
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
+                                          child: GestureDetector(
+                                            onTap: () => _copyAndPasteText(
+                                                suggestions[index]),
+                                            child: Container(
+                                              width: 250,
+                                              padding: const EdgeInsets.all(12),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF7400A5),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                              ),
+                                              child: Row(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  const Icon(Icons.message,
+                                                      color: Colors.white),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: Text(
+                                                      suggestions[index],
+                                                      maxLines: 3,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 16,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
                                           ),
                                         );
                                       },
                                     ),
                                   ),
-                                );
-                              } else if (snapshot.hasError) {
-                                return SizedBox(
-                                  height: 80,
-                                  child: Center(
-                                      child: Text('Error: ${snapshot.error}')),
-                                );
-                              } else {
-                                // Use an empty list if data is null.
-                                final List<String> suggestions =
-                                    snapshot.data ?? [];
-                                if (suggestions.isEmpty) {
-                                  return const SizedBox.shrink();
-                                }
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      // Header once above the list.
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 10.0, vertical: 4.0),
-                                        child: Text(
-                                          'BondChat Suggestions',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.bold,
-                                            color: Theme.of(context).brightness ==
-                                                    Brightness.dark
-                                                ? AppColors.darkText
-                                                : AppColors.lightText,
-                                          ),
-                                        ),
-                                      ),
-                                      SizedBox(
-                                        height: 90, // Fixed height for the list
-                                        child: ListView.builder(
-                                          scrollDirection: Axis.horizontal,
-                                          itemCount: suggestions.length,
-                                          itemBuilder: (context, index) {
-                                            return Padding(
-                                              padding: const EdgeInsets.symmetric(
-                                                  horizontal: 8.0),
-                                              child: GestureDetector(
-                                                onTap: () => _copyAndPasteText(
-                                                    suggestions[index]),
-                                                child: Container(
-                                                  width: 250,
-                                                  padding:
-                                                      const EdgeInsets.all(12),
-                                                  decoration: BoxDecoration(
-                                                    color:
-                                                        const Color(0xFF7400A5),
-                                                    borderRadius:
-                                                        BorderRadius.circular(10),
-                                                  ),
-                                                  child: Row(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment.start,
-                                                    children: [
-                                                      const Icon(Icons.message,
-                                                          color: Colors.white),
-                                                      const SizedBox(width: 8),
-                                                      Expanded(
-                                                        child: Text(
-                                                          suggestions[index],
-                                                          maxLines: 3,
-                                                          overflow: TextOverflow
-                                                              .ellipsis,
-                                                          style: const TextStyle(
-                                                            color: Colors.white,
-                                                            fontSize: 16,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }
-                            },
-                          )
-                        : const SizedBox.shrink(),
+                                ],
+                              ),
+                            );
+                          }
+                        },
+                      ),
                     Row(
                       children: [
                         Expanded(
@@ -853,9 +794,8 @@ class _DChatScreenState extends State<DChatScreen> {
                                 borderRadius: BorderRadius.circular(25),
                               ),
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                ),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 16),
                                 child: TextField(
                                   controller: _controller,
                                   style: TextStyle(
@@ -867,10 +807,11 @@ class _DChatScreenState extends State<DChatScreen> {
                                   decoration: InputDecoration(
                                     hintText: 'Type A Message...',
                                     hintStyle: GoogleFonts.poppins(
-                                        color: Theme.of(context).brightness ==
-                                                Brightness.dark
-                                            ? Colors.white60
-                                            : AppColors.lightText),
+                                      color: Theme.of(context).brightness ==
+                                              Brightness.dark
+                                          ? Colors.white60
+                                          : AppColors.lightText,
+                                    ),
                                     border: InputBorder.none,
                                   ),
                                 ),
@@ -878,14 +819,14 @@ class _DChatScreenState extends State<DChatScreen> {
                             ),
                           ),
                         ),
-                        SizedBox(width: 8),
+                        const SizedBox(width: 8),
                         Container(
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF7400A5),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF7400A5),
                             shape: BoxShape.circle,
                           ),
                           child: IconButton(
-                            icon: Icon(Icons.send, color: Colors.white),
+                            icon: const Icon(Icons.send, color: Colors.white),
                             onPressed: _sendMessage,
                           ),
                         ),
@@ -903,19 +844,12 @@ class _DChatScreenState extends State<DChatScreen> {
 
   @override
   void dispose() {
-    // Dispose controllers and other resources
     _pagingController.dispose();
     _controller.dispose();
-
-    // Clear the message handler to avoid memory leaks
-    //  _socketService.onMessageReceived = null;
-
-    // Emit the "leave" event when leaving the page
     if (_socketService.isConnected) {
       _socketService.socket.emit('leave', widget.chatRoom.chatRoomId);
       print('✅ Emitted leave event for room: ${widget.chatRoom.chatRoomId}');
     }
-
     super.dispose();
   }
 }
