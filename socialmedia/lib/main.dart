@@ -34,7 +34,6 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
@@ -42,10 +41,6 @@ void main() async {
   initLocalNotifications();
 
   FirebaseMessaging messaging = FirebaseMessaging.instance;
-
-  
-
-  
 
   NotificationSettings settings = await messaging.requestPermission(
     alert: true,
@@ -98,8 +93,6 @@ void main() async {
   );
 }
 
-
-
 Future<Widget> getInitialScreen() async {
   SharedPreferences prefs = await SharedPreferences.getInstance();
 
@@ -115,18 +108,17 @@ Future<Widget> getInitialScreen() async {
       token: temptoken,
     ); // Navigate to Home
   } else if (isLoggedIn == '2') {
-    return LoginScreen(); // Navigate to Signup if onboarding is done but not logged in
+    return const LoginScreen(); // Navigate to Signup if onboarding is done but not logged in
   } else if (isLoggedIn == '3' && userId != null && token != null) {
     callingbackgroundnotif();
     return BottomNavBarScreen(); // Navigate to Start Screen if first-time user
   } else {
-    return StartScreen();
+    return const StartScreen();
   }
 }
 
-void callingbackgroundnotif(){
-
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+void callingbackgroundnotif() {
+  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
     print("New Notification: ${message.notification}");
 
     // Show notification
@@ -161,10 +153,7 @@ void callingbackgroundnotif(){
   FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
     print("User clicked notification: ${message.notification?.title}");
   });
-
-  }
-
-
+}
 
 class MyApp extends StatefulWidget {
   final Widget initialScreen;
@@ -184,12 +173,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _initializeServices();
     getFCMToken();
-    
   }
-
-  
-
-  
 
   Future<void> _initializeServices() async {
     await _socketService.connect();
