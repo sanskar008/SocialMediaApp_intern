@@ -1,0 +1,22 @@
+{
+    "flutter": {
+        "platforms": {
+            "android": {
+                "default": {
+                    "projectId": "bondbridge-5bb5b",
+                    "appId": "1:1038776736651:android:69833bde365ec82adaed8e",
+                    "fileOutput": "android/app/google-services.json"
+                }
+            },
+            "dart": {
+                "lib/firebase_options.dart": {
+                    "projectId": "bondbridge-5bb5b",
+                    "configurations": {
+                        "android": "1:1038776736651:android:69833bde365ec82adaed8e",
+                        "ios": "1:1038776736651:ios:18a7c19960bcfe3fdaed8e"
+                    }
+                }
+            }
+        }
+    }
+}
