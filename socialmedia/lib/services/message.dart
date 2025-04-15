@@ -1,6 +1,6 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart'; // Add intl for timestamp formatting
 import 'package:socialmedia/bottom_nav_bar/activity/acitivity_screen.dart';
 import 'package:socialmedia/users/show_post_content.dart';
 
@@ -141,7 +141,6 @@ class Media {
 
 class StoryReply {
   final String content;
-
   final String? storyUrl; // Extracted from the inner entity
   final bool isBot;
 
@@ -185,12 +184,30 @@ class MessageBubble extends StatelessWidget {
     return participant?.name ?? 'Unknown User';
   }
 
+  // Format timestamp to show time for today, or date for older messages
+  String _formatTimestamp(DateTime timestamp) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final messageDate =
+        DateTime(timestamp.year, timestamp.month, timestamp.day);
+
+    if (messageDate == today) {
+      return DateFormat('h:mm a').format(timestamp); // e.g., 3:45 PM
+    } else if (messageDate == today.subtract(const Duration(days: 1))) {
+      return 'Yesterday ${DateFormat('h:mm a').format(timestamp)}';
+    } else {
+      return DateFormat('MMM d, h:mm a')
+          .format(timestamp); // e.g., Oct 10, 3:45 PM
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final senderName = _getSenderName();
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          isSender ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         if (senderName.isNotEmpty)
           Padding(
@@ -206,41 +223,65 @@ class MessageBubble extends StatelessWidget {
           ),
         Align(
           alignment: isSender ? Alignment.centerRight : Alignment.centerLeft,
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-            decoration: BoxDecoration(
-              color: isSender ? const Color(0xFF7400A5) : Colors.grey[800],
-              borderRadius: BorderRadius.circular(20),
-            ),
-            constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.75,
-            ),
-            child: message.entity != null
-                ? Column(
-                    children: [
-                      if (message.entity != null) _buildstoryreply(context),
-                      Text(
-                        message.content,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 16),
-                      ),
-                    ],
-                  )
-                : message.sharedPost != null
-                    ? _buildSharedPost(context)
-                    : Text(
-                        message.content,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 16),
-                      ),
+          child: Column(
+            crossAxisAlignment:
+                isSender ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+                decoration: BoxDecoration(
+                  color: isSender ? const Color(0xFF7400A5) : Colors.grey[800],
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.of(context).size.width * 0.75,
+                ),
+                child: message.entity != null
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (message.entity != null) _buildStoryReply(context),
+                          Text(
+                            message.content,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 16),
+                          ),
+                        ],
+                      )
+                    : message.sharedPost != null
+                        ? _buildSharedPost(context)
+                        : Text(
+                            message.content,
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 16),
+                          ),
+              ),
+              // Add timestamp below the message
+              Padding(
+                padding: EdgeInsets.only(
+                  left: isSender ? 0 : 16,
+                  right: isSender ? 16 : 0,
+                  bottom: 4,
+                ),
+                child: Text(
+                  _formatTimestamp(message.timestamp),
+                  style: TextStyle(
+                    color: Colors.grey[500],
+                    fontSize: 10,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _buildstoryreply(BuildContext context) {
+  Widget _buildStoryReply(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
