@@ -1,0 +1,3 @@
+ninja: Entering directory `C:\Users\Sanskar\AppData\Local\Pub\Cache\hosted\pub.dev\agora_rtc_engine-6.5.0\android\.cxx\Debug\6kvp4g6j\arm64-v8a'
+[1/2] Building CXX object CMakeFiles/iris_rendering_android.dir/iris_rtc_rendering_android.cc.o
+[2/2] Linking CXX shared library C:\Users\Sanskar\Documents\Projects\SocialMediaApp\SocialMediaFrontend\build\agora_rtc_engine\intermediates\cxx\Debug\6kvp4g6j\obj\arm64-v8a\libiris_rendering_android.so

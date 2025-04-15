@@ -1,0 +1,1 @@
+com.agora.iris_method_channel

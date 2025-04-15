@@ -1,0 +1,2 @@
+C:/Users/Sanskar/Documents/Projects/SocialMediaApp/socialmedia/android/app/.cxx/Debug/66416r4r/x86/CMakeFiles/edit_cache.dir
+C:/Users/Sanskar/Documents/Projects/SocialMediaApp/socialmedia/android/app/.cxx/Debug/66416r4r/x86/CMakeFiles/rebuild_cache.dir
